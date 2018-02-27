@@ -1,0 +1,157 @@
+<!doctype html>
+<!--
+@license
+Copyright (c) 2015 The Polymer Project Authors. All rights reserved.
+This code may only be used under the BSD style license found at http://polymer.github.io/LICENSE.txt
+The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
+Code distributed by Google as part of the polymer project is also
+subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
+-->
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
+
+    <script src="../../webcomponentsjs/webcomponents-lite.js"></script>
+    <script src="../../web-component-tester/browser.js"></script>
+    <script src="../../iron-test-helpers/test-helpers.js"></script>
+    <script src="helpers.js"></script>
+    <link rel="import" href="../raml-unzip.html">
+  </head>
+  <body>
+
+    <test-fixture id="basic">
+      <template>
+        <raml-unzip></raml-unzip>
+      </template>
+    </test-fixture>
+
+    <script>
+    /* global fixture, assert, RamlUnzipTestHelpers */
+    suite('Zip with api.raml file', function() {
+      var blob;
+      var element;
+      suiteSetup(function() {
+        return RamlUnzipTestHelpers.getZip('multiple-api.zip')
+        .then(function(data) {
+          blob = data;
+        });
+      });
+      setup(function() {
+        element = fixture('basic');
+      });
+
+      test('Reports an error for unrecognized type', function(done) {
+        element.addEventListener('error', function clb(e) {
+          element.removeEventListener('error', clb);
+          assert.equal(e.detail.code, 'E_UNZIP_ERROR');
+          done();
+        });
+        element.file = blob.slice();
+      });
+
+      test('Dispatches raml-unzip-ready event', function(done) {
+        element.addEventListener('raml-unzip-ready', function clb() {
+          element.removeEventListener('raml-unzip-ready', clb);
+          done();
+        });
+        element.file = new Blob([blob], {type: 'application/zip'});
+      });
+
+      test('raml-unzip-ready has all properties', function(done) {
+        element.addEventListener('raml-unzip-ready', function clb(e) {
+          element.removeEventListener('raml-unzip-ready', clb);
+          assert.typeOf(e.detail.files, 'array');
+          assert.lengthOf(e.detail.files, 8);
+          assert.typeOf(e.detail.entryPoint, 'object');
+          assert.equal(e.detail.entryPoint.filename, 'api.raml');
+          done();
+        });
+        element.file = new Blob([blob], {type: 'application/zip'});
+      });
+
+      test('Sets properties on the element', function(done) {
+        element.addEventListener('raml-unzip-ready', function clb(e) {
+          element.removeEventListener('raml-unzip-ready', clb);
+          assert.isTrue(element.fileStructure === e.detail.files);
+          assert.typeOf(element.fileStructure, 'array');
+          assert.lengthOf(element.fileStructure, 8);
+          assert.isTrue(element.entryPoint === e.detail.entryPoint);
+          assert.typeOf(element.entryPoint, 'object');
+          assert.equal(element.entryPoint.filename, 'api.raml');
+          done();
+        });
+        element.file = new Blob([blob], {type: 'application/zip'});
+      });
+    });
+
+    suite('Zip without api.raml file fut single raml file', function() {
+      var blob;
+      var element;
+      suiteSetup(function() {
+        return RamlUnzipTestHelpers.getZip('single-not-api.zip')
+        .then(function(data) {
+          blob = data;
+        });
+      });
+      setup(function() {
+        element = fixture('basic');
+      });
+
+      test('Dispatches raml-unzip-ready event', function(done) {
+        element.addEventListener('raml-unzip-ready', function clb() {
+          element.removeEventListener('raml-unzip-ready', clb);
+          done();
+        });
+        element.file = new Blob([blob], {type: 'application/zip'});
+      });
+
+      test('raml-unzip-ready has all properties', function(done) {
+        element.addEventListener('raml-unzip-ready', function clb(e) {
+          element.removeEventListener('raml-unzip-ready', clb);
+          assert.typeOf(e.detail.files, 'array');
+          assert.lengthOf(e.detail.files, 8);
+          assert.typeOf(e.detail.entryPoint, 'object');
+          assert.equal(e.detail.entryPoint.filename, 'api1.raml');
+          done();
+        });
+        element.file = new Blob([blob], {type: 'application/zip'});
+      });
+    });
+
+    suite('Zip without raml files', function() {
+      var blob;
+      var element;
+      suiteSetup(function() {
+        return RamlUnzipTestHelpers.getZip('no-raml.zip')
+        .then(function(data) {
+          blob = data;
+        });
+      });
+      setup(function() {
+        element = fixture('basic');
+      });
+
+      test('Reports an error for missing entry points', function(done) {
+        element.addEventListener('error', function clb(e) {
+          element.removeEventListener('error', clb);
+          assert.equal(e.detail.code, 'E_NO_ENTRY_POINT');
+          done();
+        });
+        element.file = new Blob([blob], {type: 'application/zip'});
+      });
+
+      test('Sets noEntryPoint property on element', function(done) {
+        element.addEventListener('error', function clb() {
+          element.removeEventListener('error', clb);
+          assert.isTrue(element.noEntryPoint);
+          done();
+        });
+        element.file = new Blob([blob], {type: 'application/zip'});
+      });
+    });
+    </script>
+
+  </body>
+</html>

@@ -1,0 +1,412 @@
+<!--
+@license
+Copyright 2016 The Advanced REST client authors <arc@mulesoft.com>
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use this file except in compliance with the License. You may obtain a copy of
+the License at
+http://www.apache.org/licenses/LICENSE-2.0
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations under
+the License.
+-->
+<link rel="import" href="../polymer/polymer.html">
+<link rel="import" href="../web-unzip/web-unzip.html">
+<link rel="import" href="../raml-main-entry-lookup/raml-main-entry-lookup.html">
+<!--
+An element to unzip raml package and provide a list of files for the parser.
+It also recognizes the API spec's main file that should be used as a main file
+for the parser.
+
+This element works great with `raml-js-parser` element.
+
+### Example
+```html
+<raml-unzip entry-point="{{apiFile}}" file-structure="{{files}}"></raml-unzip>
+<raml-js-parser raml-file="[[apiFile]]" files="[[files]]" latest-json="{{plainRaml}}" json></raml-js-parser>
+<raml-json-enhance json="[[plainRaml.specification]]" on-raml-json-enhance-ready="_ramlEnhanced" on-error="_ramlEnhanceError"></raml-json-enhance>
+
+<script>
+var unzip = document.querySelctor('raml-unzip');
+unzip.addEventListener('raml-unzip-ready', function() {
+  document.querySelctor('raml-js-parser').loadFiles();
+});
+unzip.file = new Blob([...], {type: 'application/zip'});
+</script>
+```
+
+## Entry point lookup
+
+The element uses `raml-main-entry-lookup` element to find API main file (the entry point).
+
+In most cases the lookup elememt is not used. It finds `api.raml` file in the
+main folder and if ther's a matching file then it reports it right away.
+
+When there's no RAML files in the zip's main folder then the element dispatches
+`error` custom event with `code` set to `E_NO_ENTRY_POINT`.
+
+When there's more than one RAML file in the main folder and non of it is `api.raml`
+file then it dispatches `raml-unzip-multiple-entry-points` custom event.
+Tpplication should handle the event and present the user list of available
+options. After the user selects main file the application should set `entryPoint`
+property with the file data matching the entry received with the event.
+
+### Example
+
+```html
+<raml-unzip></raml-unzip>
+<script>
+var unzip = document.querySelctor('raml-unzip');
+unzip.addEventListener('raml-unzip-multiple-entry-points', function(e) {
+  var files = e.detail.files;
+  files = files.map((entry) => {
+    return {
+      name: entry.name,
+      value: entry
+    }
+  });
+  // Assuming that it displays `name` property and reports back `value` as
+  // a custom event
+  displayEntrySelectorDialog(files);
+});
+window.addEventListener('entry-selector-dialog-result', function(e) {
+  unzip.entryPoint = e.detail.value;
+});
+</script>
+```
+
+This step allows you to handle `raml-unzip-ready` custom event. However, it
+reports back the same entry point value alongside the file structure of the zip
+file than can be accessed via `fileStructure` property.
+
+See demo page for working example.
+
+@group RAML Elements
+@element raml-unzip
+@demo demo/index.html
+-->
+
+<script>
+Polymer({
+  is: 'raml-unzip',
+  properties: {
+    /**
+     * RAML zip file to be processed.
+     * Note, if you provide a `Blob` with zip, it's `type` property should be
+     * set to `application/zip`.
+     */
+    file: Object,
+    /**
+     * Complete file structure of entries read in the zip file.
+     * Set when the zip file is read.
+     */
+    fileStructure: {
+      type: Array,
+      readOnly: true
+    },
+    /**
+     * Flag set when the zip file soes not contain any entry point of the
+     * RAML. Usually it is `api.raml` but the lookup element checks if there
+     * are other files in the main directory. This is set to `true` only
+     * when there were no RAML files in the main directory.
+     */
+    noEntryPoint: {
+      type: Boolean,
+      readOnly: true,
+      notify: true
+    },
+    /**
+     * Flag set when a zip file is being read.
+     */
+    unzipping: {
+      type: Boolean,
+      readOnly: true,
+      notify: true
+    },
+    /**
+     * Flag set to true when multiple possible entry points to a RAML spec
+     * has been found. Use `entryPoints` property to read the list of
+     * entry points or listen to `raml-unzip-multiple-entry-points` custom event.
+     */
+    multipleEntryPoints: {
+      type: Boolean,
+      readOnly: true,
+      notify: true
+    },
+    /**
+     * List of possible entry points found in the zip file.
+     * It is a list of `web-unzip` objects.
+     */
+    entryPoints: {
+      type: Array,
+      readOnly: true,
+      notify: true
+    },
+    /**
+     * API's entry point.
+     * It's salways set fust before `raml-unzip-ready` cutom event is fired.
+     *
+     * This property is also used by the hosting application to inform the
+     * element about user decision when multiple entry points has been found.
+     * Dee docs for description.
+     */
+    entryPoint: {
+      type: Object,
+      notify: true
+    }
+  },
+  /**
+   * Reference to the `web-unzip` element.
+   * @return {WebUnzip}
+   */
+  get unzip() {
+    if (!this.$) {
+      this.$ = {};
+    }
+    if (this.$.unzip) {
+      return this.$.unzip;
+    }
+    var zip = document.createElement('web-unzip');
+    zip.autoRead = true;
+    zip.flatStructure = true;
+    zip.addEventListener('web-unzip-read', this._unzipHandler);
+    zip.addEventListener('error', this._unzipErrorHandler);
+    Polymer.dom(this.root).appendChild(zip);
+    this.$.unzip = zip;
+    return zip;
+  },
+
+  get lookup() {
+    if (!this.$) {
+      this.$ = {};
+    }
+    if (this.$.lookup) {
+      return this.$.lookup;
+    }
+    var lookup = document.createElement('raml-main-entry-lookup');
+    lookup.addEventListener('entry', this._entryFoundHandler);
+    this.$.lookup = lookup;
+    return lookup;
+  },
+
+  observers: [
+    '_fileChnaged(file)',
+    '_entryPointChanged(entryPoint)'
+  ],
+
+  created: function() {
+    this._unzipHandler = this._unzipHandler.bind(this);
+    this._unzipErrorHandler = this._unzipErrorHandler.bind(this);
+    this._entryFoundHandler = this._entryFoundHandler.bind(this);
+  },
+
+  detached: function() {
+    var dom = Polymer.dom(this.root);
+    var zip = dom.querySelector('web-unzip');
+    if (zip) {
+      zip.removeEventListener('web-unzip-read', this._unzipHandler);
+      zip.removeEventListener('error', this._unzipErrorHandler);
+      dom.removeChild(zip);
+    }
+    var lookup = dom.querySelector('web-unzip');
+    if (lookup) {
+      lookup.removeEventListener('entry', this._entryFoundHandler);
+      dom.removeChild(lookup);
+    }
+  },
+  /**
+   * Resets the element properties state.
+   */
+  _reset: function() {
+    this._setUnzipping(undefined);
+    this._setFileStructure(undefined);
+    this._setNoEntryPoint(undefined);
+    this._setMultipleEntryPoints(undefined);
+    this._setEntryPoints(undefined);
+    this.entryPoint = undefined;
+  },
+  /**
+   * Handler for `file` change. Set's `file` property on the `web-unzip`
+   * element.
+   *
+   * @param {File|Blob} file Zip file.
+   */
+  _fileChnaged(file) {
+    if (!file) {
+      return;
+    }
+    this._reset();
+    this._setUnzipping(true);
+    this.unzip.file = [file];
+  },
+  /**
+   * Handler for the `web-unzip-read` custom event fired by the `web-unzip`
+   * element.
+   * Processed the file entries by passing it to the lookup element to search
+   * for RAML entry point.
+   */
+  _unzipHandler: function(e) {
+    this._setUnzipping(false);
+    this._processZipEntries(e.detail.fileStructure);
+  },
+  /**
+   * Handler for `entry` custom event of `raml-main-entry-lookup`
+   * element.
+   */
+  _entryFoundHandler: function(e) {
+    var file = e.detail.entry;
+    if (!file) {
+      this._setNoEntryPoint(true);
+      this._reportError('RAML entry point not found.', 'E_NO_ENTRY_POINT');
+      return;
+    }
+    if (file instanceof Array) {
+      var exit = true;
+      // just try to find common file name
+      for (var i = 0, len = file.length; i < len; i += 1) {
+        if (file[i].name === 'api.raml') {
+          file = file[i];
+          exit = false;
+          break;
+        }
+      }
+      if (exit) {
+        this._reportMultipleEntryPoints(file);
+        return;
+      }
+    }
+    this._processRaml(file.entry);
+  },
+
+  _entryPointChanged: function(entryPoint) {
+    if (!entryPoint || !this.multipleEntryPoints) {
+      return;
+    }
+    this._setMultipleEntryPoints(false);
+    this._setEntryPoints(undefined);
+    this._processRaml(entryPoint.entry);
+  },
+  /**
+   * Handler for the `error` custom event dispatched by the `web-unzip`
+   * component.
+   *
+   * @param {CustomEvent} e
+   */
+  _unzipErrorHandler: function(e) {
+    this._setUnzipping(false);
+    this._reportError(e.detail.message, 'E_UNZIP_ERROR');
+  },
+  /**
+   * Processes entris after unzipping them.
+   *
+   * If there's no entries it reports `E_NO_ENTRY_POINT` error and sets
+   * `noEntryPoint` property to `true`.
+   *
+   * If there's only one entry then it processes it as the result.
+   *
+   * If there's a more than one entry found then it uses `lookup` element
+   * to find the entry point.
+   *
+   * @param {?Array<object>} entries List of file structure read from the
+   * `web-unzip` component.
+   */
+  _processZipEntries: function(entries) {
+    if (!entries || !entries.length) {
+      this._setNoEntryPoint(true);
+      this._reportError('RAML entry point not found.', 'E_NO_ENTRY_POINT');
+      return;
+    }
+    if (entries.length === 1) {
+      var name = entries[0].name;
+      if (name && name.indexOf('.raml') !== -1) {
+        this._processRaml(entries[0]);
+        return;
+      }
+    }
+    this._setFileStructure(entries);
+    this.lookup.files = entries;
+  },
+  /**
+   * Reports an error via `error` event.
+   *
+   * @param {String} message Message to send
+   * @param {String} code Error code associated with the error.
+   */
+  _reportError: function(message, code) {
+    this.fire('error', {
+      message: message,
+      code: code
+    });
+  },
+  /**
+   * Dispatches `raml-unzip-multiple-entry-points` custom event.
+   *
+   * @param {Array} files List of files returned by the unzip library.
+   */
+  _reportMultipleEntryPoints: function(files) {
+    this._setMultipleEntryPoints(true);
+    this._setEntryPoints(files);
+    this.fire('raml-unzip-multiple-entry-points', {
+      files: files
+    });
+  },
+  /**
+   * Finishes the process of of unzipping the file and looking for an entry
+   * point to the API spec.
+   *
+   * @param {Object} file Unzip library file object that is API's main entry
+   * point. This file can be passed to `raml-js-parser`.
+   */
+  _processRaml: function(file) {
+    this._setMultipleEntryPoints(false);
+    this._setEntryPoints(undefined);
+    var filesystem = this.fileStructure || this.$.lookup.files;
+    this._setFileStructure(filesystem);
+    this.set('entryPoint', file);
+    this.fire('raml-unzip-ready', {
+      files: filesystem,
+      entryPoint: file
+    });
+  }
+  /**
+   * Dispatched when the zip file is read and main entry point determined.
+   * This information should be passed to `raml-js-parser` to get RAML's AST
+   * or JSON data model.
+   *
+   * @event raml-unzip-ready
+   * @param {Array<Object} files List of all files in the RAML zip file.
+   * This list is compatible with `raml-js-parser` component.
+   * @param {Object} entryPoint API spec entry point.
+   */
+  /**
+   * Dispatched when multiple entry points to the RAML spec has been found
+   * in the zip file. This can only happen when there's no `api.raml` file
+   * in the main folder of the zip file.
+   *
+   * The application that uses this element should provide an UI for the user
+   * to render a list box with options to select proper entry point for the api.
+   *
+   * When the user made the selection the application should set `entryPoint`
+   * property to a file object reported in `files` property.
+   *
+   * @event raml-unzip-multiple-entry-points
+   * @param {Array<Object>} files List of Unzip library file objects.
+   */
+
+  /**
+   * Dispatched when error occurred. This also means that the file won't be
+   * processed.
+   *
+   * ### Error codes
+   * - `E_NO_ENTRY_POINT` - when entry point for the API spec is not found.
+   * It may mean that in zip's main folder was no RAML files at all.
+   * - `E_UNZIP_ERROR` - error associated with the `web-unzip` element. Usaually
+   * this means that the zip file is corrupted and cannot be read.
+   *
+   * @event error
+   * @param {String} message Error message to display to the user.
+   * @param {String} code Error mrssage code
+   */
+});
+</script>

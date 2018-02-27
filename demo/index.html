@@ -1,0 +1,146 @@
+<!doctype html>
+<!--
+@license
+Copyright (c) 2015 The Polymer Project Authors. All rights reserved.
+This code may only be used under the BSD style license found at http://polymer.github.io/LICENSE.txt
+The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
+Code distributed by Google as part of the polymer project is also
+subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
+-->
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1, user-scalable=yes">
+  <title>raml-unzip demo</title>
+  <script src="../../webcomponentsjs/webcomponents-lite.js"></script>
+  <link rel="import" href="../../iron-demo-helpers/demo-pages-shared-styles.html">
+  <link rel="import" href="../../iron-demo-helpers/demo-snippet.html">
+  <link rel="import" href="../../paper-styles/typography.html">
+  <link rel="import" href="../raml-unzip.html">
+
+  <style is="custom-style" include="demo-pages-shared-styles">
+  .vertical-section-container {
+    max-width: 600px;
+  }
+
+  h1 {
+    @apply --paper-font-headline;
+  }
+
+  h2 {
+    @apply --paper-font-title;
+  }
+
+  .error {
+    background-color: #FF5722;
+    color: #fff;
+    padding: 12px;
+  }
+  </style>
+</head>
+<body unresolved>
+  <h1>raml-unzip demo page</h1>
+  <template is="dom-bind" id="demo">
+    <div class="vertical-section-container centered">
+      <input type="file" on-change="_fileChnaged"/>
+
+      <template is="dom-if" if="[[isError]]">
+        <p class="error">[[errorMessage]]</p>
+      </template>
+
+      <template is="dom-if" if="[[isEntrySelector]]">
+        <h2>Multiple API entry points found in the zip file</h2>
+        <p>Select one of the files to continue.</p>
+        <select on-change="_selectEntryPoint">
+          <option value="">--select entry point--</option>
+          <template is="dom-repeat" items="[[entryPoints]]">
+            <option value$="[[index]]">[[item.name]]</option>
+          </template>
+        </select>
+      </template>
+
+      <template is="dom-if" if="[[hasResult]]">
+        <h2>Read result</h2>
+        <h3>Main file</h3>
+        <p>[[mainFile.filename]] ([[mainFile.uncompressedSize]] bytes)</p>
+        <h3>File system</h3>
+        <ul>
+          <template is="dom-repeat" items="[[fileStructure]]">
+            <li>[[item.filename]] ([[item.uncompressedSize]] bytes)</li>
+          </template>
+        </ul>
+      </template>
+    </div>
+  </template>
+  <script>
+  (function(scope) {
+    scope.isError = false;
+    scope.errorMessage = undefined;
+    scope.isEntrySelector = false;
+    scope.entryPoints = undefined;
+    scope.hasResult = false;
+    scope.fileStructure = undefined;
+    scope.mainFile = undefined;
+
+    var __unzipElement;
+    function getUnzip() {
+      if (__unzipElement) {
+        return __unzipElement;
+      }
+      var elm = document.createElement('raml-unzip');
+      elm.addEventListener('error', scope._errorHandler);
+      elm.addEventListener('raml-unzip-ready', scope._unzipHandler);
+      elm.addEventListener('raml-unzip-multiple-entry-points', scope._enryPointsHandler);
+      document.body.appendChild(elm);
+      __unzipElement = elm;
+      return elm;
+    }
+    scope._fileChnaged = function(e) {
+      scope.isError = false;
+      scope.isEntrySelector = false;
+      scope.errorMessage = undefined;
+      scope.entryPoints = undefined;
+      scope.hasResult = false;
+      scope.fileStructure = undefined;
+      scope.mainFile = undefined;
+      var ramlUnzip = getUnzip();
+      ramlUnzip.file = e.target.files[0];
+    };
+
+    scope._errorHandler = function(e) {
+      scope.isError = true;
+      scope.errorMessage = e.detail.message;
+    };
+
+    scope._unzipHandler = function(e) {
+      scope.fileStructure = e.detail.files;
+      scope.mainFile = e.detail.entryPoint;
+      scope.hasResult = true;
+    };
+    scope._enryPointsHandler = function(e) {
+      scope.isEntrySelector = true;
+      var files = e.detail.files;
+      files = files.map((entry) => {
+        return {
+          name: entry.name,
+          value: entry
+        };
+      });
+      scope.entryPoints = files;
+    };
+
+    scope._selectEntryPoint = function(e) {
+      if (e.target.value === '') {
+        return;
+      }
+      var index = Number(e.target.value);
+      getUnzip().entryPoint = scope.entryPoints[index].value;
+      scope.isEntrySelector = false;
+      scope.entryPoints = undefined;
+    };
+  })(document.getElementById('demo'));
+  </script>
+</body>
+</html>
