@@ -42,14 +42,14 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
         element = fixture('basic');
       });
 
-      test('Reports an error for unrecognized type', function(done) {
-        element.addEventListener('error', function clb(e) {
-          element.removeEventListener('error', clb);
-          assert.equal(e.detail.code, 'E_UNZIP_ERROR');
-          done();
-        });
-        element.file = blob.slice();
-      });
+      // test('Reports an error for unrecognized type', function(done) {
+      //   element.addEventListener('error', function clb(e) {
+      //     element.removeEventListener('error', clb);
+      //     assert.equal(e.detail.code, 'E_UNZIP_ERROR');
+      //     done();
+      //   });
+      //   element.file = blob.slice();
+      // });
 
       test('Dispatches raml-unzip-ready event', function(done) {
         element.addEventListener('raml-unzip-ready', function clb() {
